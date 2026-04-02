@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import json
 from python_core.database import (
     save_ocorrencia, get_ocorrencias, get_ocorrencia_by_id, update_ocorrencia_status,
     save_gasto, get_gastos, get_gastos_by_ocorrencia, update_gasto_status,
     get_total_gastos, get_gastos_por_setor
 )
+from python_core.gemini_service import analisar_mensagem
 
 app = FastAPI(title="AgroFlow API", version="1.0.0")
 
@@ -26,21 +28,54 @@ def home():
 @app.post("/webhook")
 async def receber_whatsapp(request: Request):
     payload = await request.json()
-    
+
     print("========== NOVA MENSAGEM RECEBIDA ==========")
     print(payload)
     print("============================================")
-    
+
     telefone = payload.get("telefone", "")
     texto = payload.get("texto", "")
     foto_url = payload.get("foto_url", None)
-    setor = payload.get("setor", None)
-    
-    if telefone and texto:
-        id = save_ocorrencia(telefone, texto, foto_url, setor)
-        return {"status": "recebido", "id": id}
-    
-    return {"status": "recebido"}
+
+    if not (telefone and texto):
+        return {"status": "recebido"}
+
+    # Analisa com Gemini
+    resultado_raw = analisar_mensagem(texto)
+
+    try:
+        analise = json.loads(resultado_raw) if resultado_raw else None
+    except (json.JSONDecodeError, TypeError):
+        analise = None
+
+    if not analise or analise.get("tipo") == "indefinido":
+        # Fallback: salva como ocorrência com texto bruto
+        id_oc = save_ocorrencia(telefone, texto, foto_url, setor=None)
+        return {"status": "recebido", "tipo": "indefinido", "id_ocorrencia": id_oc}
+
+    tipo = analise.get("tipo")
+    descricao = analise.get("descricao", texto)
+    setor = analise.get("setor")
+
+    id_oc = save_ocorrencia(telefone, descricao, foto_url, setor)
+    print(f"[Webhook] Ocorrência salva: ID={id_oc}, tipo={tipo}")
+
+    id_gasto = None
+    if tipo in ("gasto", "ambos"):
+        produto = analise.get("produto")
+        valor_unitario = analise.get("valor_unitario")
+        quantidade = analise.get("quantidade", 1) or 1
+
+        if produto and valor_unitario:
+            id_gasto = save_gasto(id_oc, produto, float(valor_unitario), int(quantidade))
+            print(f"[Webhook] Gasto salvo: ID={id_gasto}, produto={produto}")
+
+    return {
+        "status": "recebido",
+        "tipo": tipo,
+        "id_ocorrencia": id_oc,
+        "id_gasto": id_gasto
+    }
 
 # ============ OCORRENCIAS ============
 
