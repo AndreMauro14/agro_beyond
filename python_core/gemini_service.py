@@ -4,11 +4,17 @@ from google import genai
 
 load_dotenv()
 
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+GEMINI_ENABLED = os.getenv("GEMINI_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY")) if GEMINI_ENABLED else None
 
 def analisar_mensagem(texto: str):
     """Analisa a mensagem e retorna JSON estruturado"""
-    
+
+    if not GEMINI_ENABLED:
+        print("[Gemini] desligado (GEMINI_ENABLED=false) — pulando análise")
+        return None
+
     prompt = f"""
 Você é um assistente agrícola. Analise a mensagem abaixo e retorne APENAS um JSON válido (sem markdown, sem ```).
 
@@ -52,3 +58,4 @@ Se não conseguir identificar informações agrícolas relevantes, retorne tipo 
     except Exception as e:
         print(f"[Gemini] Erro: {e}")
         return None
+# reload

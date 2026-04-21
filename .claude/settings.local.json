@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p presentation)",
+      "Bash(mv components *)",
+      "Bash(mv pages *)",
+      "Bash(mv hooks *)",
+      "Bash(mv context *)"
+    ]
+  }
+}

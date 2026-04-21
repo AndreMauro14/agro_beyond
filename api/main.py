@@ -8,6 +8,7 @@ from python_core.database import (
     get_total_gastos, get_gastos_por_setor
 )
 from python_core.gemini_service import analisar_mensagem
+from python_core.whatsapp_state import snapshot as whatsapp_snapshot
 
 app = FastAPI(title="AgroFlow API", version="1.0.0")
 
@@ -139,6 +140,12 @@ def relatorio_total():
 @app.get("/relatorios/por-setor")
 def relatorio_por_setor():
     return get_gastos_por_setor()
+
+# ============ WHATSAPP ============
+
+@app.get("/whatsapp/status")
+def whatsapp_status():
+    return whatsapp_snapshot()
 
 if __name__ == "__main__":
     uvicorn.run("api.main:app", host="127.0.0.1", port=8000, reload=True)

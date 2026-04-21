@@ -10,7 +10,10 @@ redis_client = redis.Redis(
     decode_responses=True
 )
 
-TEMPO_ESPERA = 120
+TEMPO_ESPERA = int(os.getenv("MESSAGE_BUFFER_SECONDS", "20"))
+# TTL do Redis precisa ser maior que o timer pra evitar que o buffer expire
+# antes do timer do bot disparar
+BUFFER_TTL = TEMPO_ESPERA + 60
 
 def adicionar_mensagem(telefone: str, texto: str):
     """Adiciona mensagem ao buffer do usuário"""
@@ -25,8 +28,8 @@ def adicionar_mensagem(telefone: str, texto: str):
         mensagens = texto
     
     # Salva e reseta o timer
-    redis_client.setex(chave, TEMPO_ESPERA, mensagens)
-    print(f"[Redis] Buffer de {telefone}: {mensagens}")
+    redis_client.setex(chave, BUFFER_TTL, mensagens)
+    print(f"[Redis] Buffer de {telefone} (TTL={redis_client.ttl(chave)}s): {mensagens}", flush=True)
 
 def pegar_mensagens(telefone: str):
     """Pega todas as mensagens acumuladas"""
