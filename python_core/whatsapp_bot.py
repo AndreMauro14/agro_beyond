@@ -16,7 +16,9 @@ load_dotenv()
 API_URL = os.getenv("API_URL", "http://localhost:8000/webhook")
 TEMPO_ESPERA = int(os.getenv("MESSAGE_BUFFER_SECONDS", "20"))
 
-GRUPO_AGROFLOW = None
+# ID do chat/grupo permitido. Se vazio (""), aceita tudo (modo dev).
+# Em produção: coloque o ID do grupo dedicado no .env.
+GRUPO_AGROFLOW = os.getenv("GRUPO_WHATSAPP", "").strip() or None
 
 timers = {}
 
@@ -106,13 +108,17 @@ def on_message(client, event):
     print(f"Texto: {texto}")
     print("-"*30)
 
-    if GRUPO_AGROFLOW is None or GRUPO_AGROFLOW in chat:
-        if texto:
-            adicionar_mensagem(telefone, texto)
-            agendar_envio(telefone, chat)
+    if GRUPO_AGROFLOW is not None and GRUPO_AGROFLOW not in chat and GRUPO_AGROFLOW not in telefone:
+        print(f"[Filtro] Ignorando chat={chat[:40]!r}: fora do grupo {GRUPO_AGROFLOW}", flush=True)
+        return
+
+    if texto:
+        adicionar_mensagem(telefone, texto)
+        agendar_envio(telefone, chat)
 
 if __name__ == "__main__":
     print("Manda Cá - WhatsApp Bot")
     print("Iniciando...")
     print(f"Tempo de espera entre mensagens: {TEMPO_ESPERA}s")
+    print(f"Filtro de grupo: {GRUPO_AGROFLOW or '(DESLIGADO — aceita tudo)'}")
     client.connect()

@@ -1,22 +1,30 @@
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, BarChart3, Calendar as CalendarIcon, FileDown, FileSpreadsheet, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, BarChart3, Calendar as CalendarIcon, FileDown, FileSpreadsheet, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/presentation/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/presentation/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/presentation/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/presentation/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/presentation/components/ui/alert-dialog";
 import { Label } from "@/presentation/components/ui/label";
-import { useTransactions } from "@/presentation/contexts/TransactionContext";
 import { formatBRL, formatDateShort } from "@/application/services/format.service";
 import { exportCSV, exportPDF } from "@/application/services/export.service";
+import { mergeCashflow, summaryFor, type CashflowEntry } from "@/application/services/cashflow.service";
+import { useGanhos, useDeleteGanho } from "@/presentation/hooks/useGanhos";
+import { useGastos, useDeleteGasto } from "@/presentation/hooks/useGastos";
+import { useOcorrencias } from "@/presentation/hooks/useOcorrencias";
 import { cn } from "@/presentation/utils/cn";
 import { toast } from "sonner";
 
 const MONTH_NAMES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
 export default function Caixa() {
-  const { transactions, removeTransaction } = useTransactions();
-  const [pendingDelete, setPendingDelete] = useState<{ id: string; description: string } | null>(null);
+  const ganhos = useGanhos();
+  const gastos = useGastos();
+  const ocorrencias = useOcorrencias();
+  const deleteGanho = useDeleteGanho();
+  const deleteGasto = useDeleteGasto();
+
+  const [pendingDelete, setPendingDelete] = useState<CashflowEntry | null>(null);
   const now = new Date();
   const [month, setMonth] = useState<number>(now.getMonth());
   const [year, setYear] = useState<number>(now.getFullYear());
@@ -24,69 +32,85 @@ export default function Caixa() {
 
   const periodLabel = `${MONTH_NAMES[month]} ${year}`;
 
+  const setorPorOcorrencia = useMemo(() => {
+    const map = new Map<number, string | null>();
+    (ocorrencias.data ?? []).forEach((o) => map.set(o.id, o.setor ?? null));
+    return map;
+  }, [ocorrencias.data]);
+
+  const allEntries = useMemo(
+    () => mergeCashflow(ganhos.data ?? [], gastos.data ?? [], setorPorOcorrencia),
+    [ganhos.data, gastos.data, setorPorOcorrencia],
+  );
+
   const yearOptions = useMemo(() => {
     const ys = new Set<number>();
-    transactions.forEach((t) => ys.add(new Date(t.date).getFullYear()));
+    allEntries.forEach((e) => ys.add(new Date(e.date).getFullYear()));
     ys.add(now.getFullYear());
     ys.add(year);
     return Array.from(ys).sort((a, b) => b - a);
-  }, [transactions, year]);
+  }, [allEntries, year]);
 
   const filtered = useMemo(
     () =>
-      transactions.filter((t) => {
-        const d = new Date(t.date);
+      allEntries.filter((e) => {
+        const d = new Date(e.date);
         return d.getMonth() === month && d.getFullYear() === year;
       }),
-    [transactions, month, year],
+    [allEntries, month, year],
   );
 
-  const { entradas, saidas, saldo, maxBar } = useMemo(() => {
-    const entradas = filtered.filter((t) => t.type === "entrada").reduce((s, t) => s + t.amount, 0);
-    const saidas = filtered.filter((t) => t.type === "saida").reduce((s, t) => s + Math.abs(t.amount), 0);
-    return {
-      entradas,
-      saidas,
-      saldo: entradas - saidas,
-      maxBar: Math.max(entradas, saidas, 1),
-    };
-  }, [filtered]);
+  const { entradas, saidas, saldo } = useMemo(() => summaryFor(filtered), [filtered]);
+  const maxBar = Math.max(entradas, saidas, 1);
 
   const summary = { entradas, saidas, saldo, periodo: periodLabel };
 
   const handleExportPDF = () => {
     if (filtered.length === 0) {
-      toast.error(`Nenhuma transação em ${periodLabel} para exportar`);
+      toast.error(`Nenhum lançamento em ${periodLabel} para exportar`);
       return;
     }
     try {
       exportPDF(filtered, summary);
       toast.success("Relatório PDF gerado com sucesso");
-    } catch (e) {
+    } catch {
       toast.error("Erro ao gerar PDF");
     }
   };
 
   const handleExportCSV = () => {
     if (filtered.length === 0) {
-      toast.error(`Nenhuma transação em ${periodLabel} para exportar`);
+      toast.error(`Nenhum lançamento em ${periodLabel} para exportar`);
       return;
     }
     try {
       exportCSV(filtered, summary);
       toast.success("CSV exportado com sucesso");
-    } catch (e) {
+    } catch {
       toast.error("Erro ao gerar CSV");
     }
   };
 
+  const confirmarExclusao = () => {
+    if (!pendingDelete) return;
+    const mut = pendingDelete.kind === "ganho" ? deleteGanho : deleteGasto;
+    mut.mutate(pendingDelete.originalId, {
+      onSuccess: () => {
+        toast.success("Lançamento excluído");
+        setPendingDelete(null);
+      },
+      onError: () => toast.error("Erro ao excluir"),
+    });
+  };
+
+  const loading = ganhos.isLoading || gastos.isLoading;
+
   return (
     <div className="container py-10">
-      {/* Title row */}
       <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
         <div className="border-l-4 border-warning pl-4">
           <h1 className="font-display text-4xl font-extrabold text-primary md:text-5xl">Controle de Caixa</h1>
-          <p className="mt-2 text-muted-foreground">Visão detalhada de movimentações financeiras</p>
+          <p className="mt-2 text-muted-foreground">Entradas e saídas consolidadas</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Popover open={periodOpen} onOpenChange={setPeriodOpen}>
@@ -119,13 +143,7 @@ export default function Caixa() {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button
-                  className="w-full"
-                  onClick={() => {
-                    setPeriodOpen(false);
-                    toast.success(`Período: ${MONTH_NAMES[month]} ${year}`);
-                  }}
-                >
+                <Button className="w-full" onClick={() => { setPeriodOpen(false); toast.success(`Período: ${MONTH_NAMES[month]} ${year}`); }}>
                   Aplicar
                 </Button>
               </div>
@@ -151,14 +169,16 @@ export default function Caixa() {
         </div>
       </div>
 
-      {/* Saldo + Comparativo */}
       <div className="mt-8 grid gap-4 lg:grid-cols-3">
         <div className="rounded-lg bg-card p-6 shadow-card ring-1 ring-border/40">
           <p className="text-sm font-semibold text-foreground">Saldo do Período</p>
           <p className="mt-1 text-xs uppercase tracking-wider text-muted-foreground">{periodLabel}</p>
-          <p className="mt-8 font-display text-4xl font-extrabold text-primary">{formatBRL(saldo)}</p>
+          <p className={cn(
+            "mt-8 font-display text-4xl font-extrabold",
+            saldo >= 0 ? "text-primary" : "text-warning",
+          )}>{formatBRL(saldo)}</p>
           <p className="mt-3 text-xs text-muted-foreground">
-            {filtered.length} {filtered.length === 1 ? "transação registrada" : "transações registradas"}
+            {filtered.length} {filtered.length === 1 ? "lançamento registrado" : "lançamentos registrados"}
           </p>
         </div>
 
@@ -167,7 +187,6 @@ export default function Caixa() {
             <h3 className="font-semibold text-foreground">Entradas vs Saídas</h3>
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </div>
-
           <div className="mt-6 space-y-5">
             <BarRow label="Entradas" value={entradas} max={maxBar} color="bg-success" valueClass="text-success" />
             <BarRow label="Saídas" value={saidas} max={maxBar} color="bg-warning" valueClass="text-warning" />
@@ -175,9 +194,8 @@ export default function Caixa() {
         </div>
       </div>
 
-      {/* Tabela */}
       <section className="mt-10">
-        <h2 className="font-display text-xl font-bold text-primary">Transações Recentes</h2>
+        <h2 className="font-display text-xl font-bold text-primary">Lançamentos do período</h2>
 
         <div className="mt-4 overflow-hidden rounded-lg bg-card-elevated shadow-card ring-1 ring-border/40">
           <div className="grid grid-cols-[140px_1fr_180px_160px_40px] gap-4 border-b border-border/60 px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -188,47 +206,51 @@ export default function Caixa() {
             <span className="sr-only">Ações</span>
           </div>
 
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="px-6 py-16 text-center">
-              <p className="text-sm font-medium text-foreground">Nenhuma transação em {periodLabel}</p>
-              <p className="mt-1 text-xs text-muted-foreground">Use o botão "Lançar Transação" para registrar entradas e saídas deste mês.</p>
+              <p className="text-sm font-medium text-foreground">Nenhum lançamento em {periodLabel}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Use "Lançar Transação" pra registrar entradas ou mande uma mensagem no WhatsApp pra registrar gastos.
+              </p>
             </div>
           ) : (
-            filtered.map((t) => (
+            filtered.map((e) => (
               <div
-                key={t.id}
+                key={e.id}
                 className="group grid grid-cols-[140px_1fr_180px_160px_40px] items-center gap-4 border-b border-border/40 px-6 py-4 last:border-b-0 transition-colors hover:bg-card-soft/50"
               >
                 <div className="flex items-center gap-2">
-                  <span
-                    className={cn(
-                      "grid h-7 w-7 place-items-center rounded-full",
-                      t.type === "entrada" ? "bg-success-soft text-success" : "bg-warning-soft text-warning",
-                    )}
-                  >
-                    {t.type === "entrada" ? <ArrowDown className="h-3.5 w-3.5" /> : <ArrowUp className="h-3.5 w-3.5" />}
+                  <span className={cn(
+                    "grid h-7 w-7 place-items-center rounded-full",
+                    e.kind === "ganho" ? "bg-success-soft text-success" : "bg-warning-soft text-warning",
+                  )}>
+                    {e.kind === "ganho" ? <ArrowDown className="h-3.5 w-3.5" /> : <ArrowUp className="h-3.5 w-3.5" />}
                   </span>
-                  <span className="text-sm text-muted-foreground">{formatDateShort(t.date)}</span>
+                  <span className="text-sm text-muted-foreground">{formatDateShort(e.date)}</span>
                 </div>
-                <span className="text-sm font-medium text-foreground">{t.description}</span>
+                <span className="text-sm font-medium text-foreground">{e.description}</span>
                 <span>
                   <span className={cn(
                     "rounded-full px-3 py-1 text-xs font-medium",
-                    t.type === "entrada" ? "bg-success-soft text-success" : "bg-warning-soft text-warning",
+                    e.kind === "ganho" ? "bg-success-soft text-success" : "bg-warning-soft text-warning",
                   )}>
-                    {t.category}
+                    {e.category}
                   </span>
                 </span>
                 <span className={cn(
                   "text-right font-display text-base font-bold",
-                  t.type === "entrada" ? "text-success" : "text-warning",
+                  e.kind === "ganho" ? "text-success" : "text-warning",
                 )}>
-                  {formatBRL(t.amount, { withSign: true })}
+                  {formatBRL(e.kind === "ganho" ? e.amount : -e.amount, { withSign: true })}
                 </span>
                 <button
                   type="button"
-                  onClick={() => setPendingDelete({ id: t.id, description: t.description })}
-                  aria-label={`Excluir transação ${t.description}`}
+                  onClick={() => setPendingDelete(e)}
+                  aria-label={`Excluir lançamento ${e.description}`}
                   className="grid h-8 w-8 place-items-center rounded-md text-muted-foreground opacity-0 transition-all hover:bg-warning-soft hover:text-warning focus-visible:opacity-100 group-hover:opacity-100"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -239,26 +261,19 @@ export default function Caixa() {
         </div>
       </section>
 
-
       <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir transação?</AlertDialogTitle>
+            <AlertDialogTitle>Excluir lançamento?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. A transação{" "}
-              <span className="font-medium text-foreground">"{pendingDelete?.description}"</span> será removida permanentemente.
+              Esta ação não pode ser desfeita. O lançamento{" "}
+              <span className="font-medium text-foreground">"{pendingDelete?.description}"</span> será removido permanentemente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => {
-                if (pendingDelete) {
-                  removeTransaction(pendingDelete.id);
-                  toast.success("Transação excluída");
-                  setPendingDelete(null);
-                }
-              }}
+              onClick={confirmarExclusao}
               className="bg-warning text-warning-foreground hover:bg-warning/90"
             >
               Excluir

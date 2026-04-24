@@ -1,5 +1,16 @@
+# Secrets
 .env
+.env.local
+
+# Python
 venv/
 __pycache__/
 *.pyc
-Agroflow
+
+# Neonize - sessão do WhatsApp
+AgroFlow
+python_core/AgroFlow
+
+# Estado do bot WhatsApp (QR, status)
+python_core/.whatsapp_state.json
+python_core/.whatsapp_state.json.tmp

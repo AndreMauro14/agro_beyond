@@ -23,4 +23,9 @@ export class OcorrenciaApiRepository implements IOcorrenciaRepository {
     );
     return !!res?.success;
   }
+
+  async remove(id: number): Promise<boolean> {
+    const res = await httpClient.delete<{ success: boolean }>(`/ocorrencias/${id}`);
+    return !!res?.success;
+  }
 }

@@ -4,10 +4,14 @@ import uvicorn
 import json
 from python_core.database import (
     save_ocorrencia, get_ocorrencias, get_ocorrencia_by_id, update_ocorrencia_status,
-    save_gasto, get_gastos, get_gastos_by_ocorrencia, update_gasto_status,
-    get_total_gastos, get_gastos_por_setor
+    delete_ocorrencia,
+    save_gasto, get_gastos, get_gastos_by_ocorrencia, update_gasto_status, delete_gasto,
+    get_total_gastos, get_gastos_por_setor,
+    get_gastos_por_produto, get_gastos_por_mes,
+    save_ganho, get_ganhos, delete_ganho, get_ganhos_por_mes,
 )
-from python_core.gemini_service import analisar_mensagem
+from python_core.gemini_service import analisar_mensagem, GEMINI_ENABLED
+from python_core.parser import analisar_com_regex
 from python_core.whatsapp_state import snapshot as whatsapp_snapshot
 
 app = FastAPI(title="AgroFlow API", version="1.0.0")
@@ -41,25 +45,31 @@ async def receber_whatsapp(request: Request):
     if not (telefone and texto):
         return {"status": "recebido"}
 
-    # Analisa com Gemini
-    resultado_raw = analisar_mensagem(texto)
+    # 1) tenta parser regex (grátis, rápido)
+    analise = analisar_com_regex(texto)
+    fonte = "regex" if analise else None
 
-    try:
-        analise = json.loads(resultado_raw) if resultado_raw else None
-    except (json.JSONDecodeError, TypeError):
-        analise = None
+    # 2) fallback Gemini se o regex não casou e a flag tá ligada
+    if not analise and GEMINI_ENABLED:
+        resultado_raw = analisar_mensagem(texto)
+        try:
+            analise = json.loads(resultado_raw) if resultado_raw else None
+            fonte = "gemini" if analise else None
+        except (json.JSONDecodeError, TypeError):
+            analise = None
 
     if not analise or analise.get("tipo") == "indefinido":
-        # Fallback: salva como ocorrência com texto bruto
-        id_oc = save_ocorrencia(telefone, texto, foto_url, setor=None)
+        # nenhum parser identificou → salva como ocorrência bruta pendente
+        id_oc = save_ocorrencia(telefone, texto, foto_url, setor=None, status="pendente")
         return {"status": "recebido", "tipo": "indefinido", "id_ocorrencia": id_oc}
 
     tipo = analise.get("tipo")
     descricao = analise.get("descricao", texto)
     setor = analise.get("setor")
 
-    id_oc = save_ocorrencia(telefone, descricao, foto_url, setor)
-    print(f"[Webhook] Ocorrência salva: ID={id_oc}, tipo={tipo}")
+    # quando identificou: ocorrência já entra como "concluida" pra agilizar
+    id_oc = save_ocorrencia(telefone, descricao, foto_url, setor, status="concluida")
+    print(f"[Webhook] Ocorrência salva (fonte={fonte}): ID={id_oc}, tipo={tipo}, setor={setor}")
 
     id_gasto = None
     if tipo in ("gasto", "ambos"):
@@ -68,14 +78,18 @@ async def receber_whatsapp(request: Request):
         quantidade = analise.get("quantidade", 1) or 1
 
         if produto and valor_unitario:
-            id_gasto = save_gasto(id_oc, produto, float(valor_unitario), int(quantidade))
-            print(f"[Webhook] Gasto salvo: ID={id_gasto}, produto={produto}")
+            id_gasto = save_gasto(
+                id_oc, produto, float(valor_unitario), int(quantidade),
+                status_aprovacao="aprovado",
+            )
+            print(f"[Webhook] Gasto salvo (aprovado): ID={id_gasto}, produto={produto}")
 
     return {
         "status": "recebido",
         "tipo": tipo,
+        "fonte": fonte,
         "id_ocorrencia": id_oc,
-        "id_gasto": id_gasto
+        "id_gasto": id_gasto,
     }
 
 # ============ OCORRENCIAS ============
@@ -100,6 +114,12 @@ async def atualizar_status_ocorrencia(id: int, request: Request):
         return {"success": True}
     raise HTTPException(status_code=500, detail="Erro ao atualizar")
 
+@app.delete("/ocorrencias/{id}")
+def remover_ocorrencia(id: int):
+    if delete_ocorrencia(id):
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="Ocorrencia nao encontrada")
+
 # ============ GASTOS ============
 
 @app.get("/gastos")
@@ -119,6 +139,36 @@ async def criar_gasto(request: Request):
         return {"success": True, "id": id}
     raise HTTPException(status_code=500, detail="Erro ao salvar gasto")
 
+@app.post("/gastos/manual")
+async def criar_gasto_manual(request: Request):
+    """Lançamento manual de saída via formulário do /caixa.
+    Cria uma ocorrência sintética + gasto aprovado."""
+    body = await request.json()
+    descricao = body.get("descricao")
+    valor = body.get("valor")
+    setor = body.get("setor")
+    if not descricao or valor is None:
+        raise HTTPException(status_code=400, detail="descricao e valor são obrigatórios")
+
+    id_oc = save_ocorrencia(
+        telefone="manual",
+        descricao=f"[Manual] {descricao}",
+        foto_url=None,
+        setor=setor,
+        status="concluida",
+    )
+    if not id_oc:
+        raise HTTPException(status_code=500, detail="Erro ao criar ocorrência")
+
+    id_gasto = save_gasto(
+        id_ocorrencia=id_oc,
+        nome_produto=descricao,
+        valor_unitario=float(valor),
+        quantidade=1,
+        status_aprovacao="aprovado",
+    )
+    return {"success": True, "id_ocorrencia": id_oc, "id_gasto": id_gasto}
+
 @app.patch("/gastos/{id}/aprovar")
 def aprovar_gasto(id: int):
     if update_gasto_status(id, "aprovado"):
@@ -131,6 +181,41 @@ def reprovar_gasto(id: int):
         return {"success": True, "status": "reprovado"}
     raise HTTPException(status_code=500, detail="Erro ao reprovar")
 
+@app.delete("/gastos/{id}")
+def remover_gasto(id: int):
+    if delete_gasto(id):
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="Gasto nao encontrado")
+
+# ============ GANHOS ============
+
+@app.get("/ganhos")
+def listar_ganhos():
+    return get_ganhos()
+
+@app.post("/ganhos")
+async def criar_ganho(request: Request):
+    body = await request.json()
+    descricao = body.get("descricao")
+    valor = body.get("valor")
+    if not descricao or valor is None:
+        raise HTTPException(status_code=400, detail="descricao e valor são obrigatórios")
+    id = save_ganho(
+        descricao=descricao,
+        valor=float(valor),
+        categoria=body.get("categoria"),
+        data=body.get("data"),
+    )
+    if id:
+        return {"success": True, "id": id}
+    raise HTTPException(status_code=500, detail="Erro ao salvar ganho")
+
+@app.delete("/ganhos/{id}")
+def remover_ganho(id: int):
+    if delete_ganho(id):
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="Ganho nao encontrado")
+
 # ============ RELATORIOS ============
 
 @app.get("/relatorios/total")
@@ -141,6 +226,18 @@ def relatorio_total():
 def relatorio_por_setor():
     return get_gastos_por_setor()
 
+@app.get("/relatorios/por-produto")
+def relatorio_por_produto(limit: int = 5):
+    return get_gastos_por_produto(limit=limit)
+
+@app.get("/relatorios/por-mes")
+def relatorio_por_mes(meses: int = 6):
+    return get_gastos_por_mes(meses=meses)
+
+@app.get("/relatorios/ganhos-por-mes")
+def relatorio_ganhos_por_mes(meses: int = 6):
+    return get_ganhos_por_mes(meses=meses)
+
 # ============ WHATSAPP ============
 
 @app.get("/whatsapp/status")
@@ -149,3 +246,4 @@ def whatsapp_status():
 
 if __name__ == "__main__":
     uvicorn.run("api.main:app", host="127.0.0.1", port=8000, reload=True)
+

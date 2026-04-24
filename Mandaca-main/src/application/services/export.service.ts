@@ -1,6 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import type { Transaction } from "@/domain/entities/Transaction";
+import type { CashflowEntry } from "./cashflow.service";
 import { formatBRL, formatDateShort } from "./format.service";
 
 interface ExportSummary {
@@ -21,18 +21,18 @@ const downloadBlob = (blob: Blob, filename: string) => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
-export function exportCSV(transactions: Transaction[], summary: ExportSummary) {
+export function exportCSV(entries: CashflowEntry[], summary: ExportSummary) {
   const header = ["Data", "Descrição", "Categoria", "Tipo", "Valor (R$)"];
-  const rows = transactions.map((t) => [
-    formatDateShort(t.date),
-    `"${t.description.replace(/"/g, '""')}"`,
-    t.category,
-    t.type === "entrada" ? "Entrada" : "Saída",
-    t.amount.toFixed(2).replace(".", ","),
+  const rows = entries.map((e) => [
+    formatDateShort(e.date),
+    `"${e.description.replace(/"/g, '""')}"`,
+    e.category,
+    e.kind === "ganho" ? "Entrada" : "Saída",
+    (e.kind === "ganho" ? e.amount : -e.amount).toFixed(2).replace(".", ","),
   ]);
 
   const meta = [
-    `Mandaca - Controle de Caixa`,
+    `Manda Cá - Controle de Caixa`,
     `Período: ${summary.periodo}`,
     `Saldo: ${formatBRL(summary.saldo)}`,
     `Entradas: ${formatBRL(summary.entradas)}`,
@@ -42,11 +42,11 @@ export function exportCSV(transactions: Transaction[], summary: ExportSummary) {
 
   const csv = meta + "\n" + [header, ...rows].map((r) => r.join(";")).join("\n");
 
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
   downloadBlob(blob, `mandaca-caixa-${Date.now()}.csv`);
 }
 
-export function exportPDF(transactions: Transaction[], summary: ExportSummary) {
+export function exportPDF(entries: CashflowEntry[], summary: ExportSummary) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
 
@@ -55,7 +55,7 @@ export function exportPDF(transactions: Transaction[], summary: ExportSummary) {
   doc.setTextColor(252, 251, 248);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(20);
-  doc.text("Mandaca", 40, 32);
+  doc.text("Manda Cá", 40, 32);
   doc.setFontSize(11);
   doc.setFont("helvetica", "normal");
   doc.text("Gestão Rural Inteligente", 40, 50);
@@ -93,12 +93,12 @@ export function exportPDF(transactions: Transaction[], summary: ExportSummary) {
   autoTable(doc, {
     startY: cardY + 85,
     head: [["Data", "Descrição", "Categoria", "Tipo", "Valor (R$)"]],
-    body: transactions.map((t) => [
-      formatDateShort(t.date),
-      t.description,
-      t.category,
-      t.type === "entrada" ? "Entrada" : "Saída",
-      formatBRL(t.amount, { withSign: true }),
+    body: entries.map((e) => [
+      formatDateShort(e.date),
+      e.description,
+      e.category,
+      e.kind === "ganho" ? "Entrada" : "Saída",
+      formatBRL(e.kind === "ganho" ? e.amount : -e.amount, { withSign: true }),
     ]),
     styles: { font: "helvetica", fontSize: 10, cellPadding: 8 },
     headStyles: { fillColor: [28, 65, 41], textColor: [252, 251, 248], fontStyle: "bold" },
@@ -109,9 +109,9 @@ export function exportPDF(transactions: Transaction[], summary: ExportSummary) {
     },
     didParseCell: (data) => {
       if (data.section === "body" && data.column.index === 4) {
-        const raw = transactions[data.row.index];
+        const raw = entries[data.row.index];
         if (raw) {
-          data.cell.styles.textColor = raw.type === "entrada" ? [46, 125, 50] : [230, 130, 40];
+          data.cell.styles.textColor = raw.kind === "ganho" ? [46, 125, 50] : [230, 130, 40];
         }
       }
     },
@@ -124,7 +124,7 @@ export function exportPDF(transactions: Transaction[], summary: ExportSummary) {
     doc.setFontSize(9);
     doc.setTextColor(140, 140, 140);
     doc.text(
-      `© ${new Date().getFullYear()} Mandaca - Gestão Rural Inteligente`,
+      `© ${new Date().getFullYear()} Manda Cá - Gestão Rural Inteligente`,
       40,
       doc.internal.pageSize.getHeight() - 20,
     );
