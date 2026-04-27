@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock, MessageCircle, Pencil, Receipt, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, DollarSign, MessageCircle, Pencil, Receipt, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/presentation/components/ui/button";
 import { Badge } from "@/presentation/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/presentation/components/ui/select";
@@ -8,6 +8,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/presentation/components/ui/alert-dialog";
+import GastoValorDialog from "@/presentation/components/transactions/GastoValorDialog";
 import { useOcorrencias, useUpdateOcorrenciaStatus, useDeleteOcorrencia } from "@/presentation/hooks/useOcorrencias";
 import { useAprovarGasto, useReprovarGasto, useRelatorioTotal, useGastos } from "@/presentation/hooks/useGastos";
 import { formatBRL, formatDateShort } from "@/application/services/format.service";
@@ -55,6 +56,24 @@ export default function Ocorrencias() {
     });
     return map;
   }, [gastos]);
+
+  // Primeiro gasto por ocorrência — usado pra pré-preencher o dialog de edição
+  const primeiroGastoPorOcorrencia = useMemo(() => {
+    const map = new Map<number, { id: number; nome_produto: string; valor_unitario: number; quantidade: number }>();
+    (gastos ?? []).forEach((g) => {
+      if (!map.has(g.id_ocorrencia)) {
+        map.set(g.id_ocorrencia, {
+          id: g.id,
+          nome_produto: g.nome_produto,
+          valor_unitario: Number(g.valor_unitario),
+          quantidade: Number(g.quantidade),
+        });
+      }
+    });
+    return map;
+  }, [gastos]);
+
+  const [valorDialog, setValorDialog] = useState<{ id: number; descricao: string } | null>(null);
 
   const { aFazer, concluidas } = useMemo(() => {
     const af: Ocorrencia[] = [];
@@ -154,10 +173,12 @@ export default function Ocorrencias() {
               <OcorrenciaCard
                 key={o.id}
                 ocorrencia={o}
+                valor={valorPorOcorrencia.get(o.id) ?? 0}
                 onStatusChange={handleStatus}
                 onAprovarGasto={handleAprovarGasto}
                 onReprovarGasto={handleReprovarGasto}
                 onDelete={(id, descricao) => setPendingDelete({ id, descricao })}
+                onEditValor={(id, descricao) => setValorDialog({ id, descricao: limparDescricao(descricao) })}
               />
             ))}
           </div>
@@ -205,12 +226,12 @@ export default function Ocorrencias() {
                   <span className={cn("text-right font-display font-bold", valor > 0 ? "text-warning" : "text-muted-foreground")}>
                     {valor > 0 ? formatBRL(valor) : "—"}
                   </span>
-                  <div className="flex items-center justify-end gap-2">
+                  <div className="flex items-center justify-end gap-1">
                     <Select
                       value="concluida"
                       onValueChange={(v) => handleStatus(o.id, v)}
                     >
-                      <SelectTrigger className="h-8 w-[126px] text-xs">
+                      <SelectTrigger className="h-8 w-[110px] text-xs">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -219,6 +240,14 @@ export default function Ocorrencias() {
                         <SelectItem value="concluida">Concluída</SelectItem>
                       </SelectContent>
                     </Select>
+                    <button
+                      type="button"
+                      aria-label="Editar valor"
+                      onClick={() => setValorDialog({ id: o.id, descricao: limparDescricao(o.descricao) })}
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-primary/10 hover:text-primary"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
                     <button
                       type="button"
                       aria-label="Excluir"
@@ -265,6 +294,14 @@ export default function Ocorrencias() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="text-primary"
+                      onClick={() => setValorDialog({ id: o.id, descricao: limparDescricao(o.descricao) })}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       className="text-warning"
                       onClick={() => setPendingDelete({ id: o.id, descricao: o.descricao })}
                     >
@@ -276,6 +313,16 @@ export default function Ocorrencias() {
             })}
           </div>
         </section>
+      )}
+
+      {valorDialog && (
+        <GastoValorDialog
+          open={!!valorDialog}
+          onOpenChange={(o) => !o && setValorDialog(null)}
+          ocorrenciaId={valorDialog.id}
+          ocorrenciaDescricao={valorDialog.descricao}
+          gastoExistente={primeiroGastoPorOcorrencia.get(valorDialog.id) ?? null}
+        />
       )}
 
       <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
@@ -317,13 +364,15 @@ function StatCard({ label, value, icon }: { label: string; value: number | strin
 
 interface OcorrenciaCardProps {
   ocorrencia: Ocorrencia;
+  valor: number;
   onStatusChange: (id: number, status: string) => void;
   onAprovarGasto: (id: number) => void;
   onReprovarGasto: (id: number) => void;
   onDelete: (id: number, descricao: string) => void;
+  onEditValor: (id: number, descricao: string) => void;
 }
 
-function OcorrenciaCard({ ocorrencia, onStatusChange, onAprovarGasto, onReprovarGasto, onDelete }: OcorrenciaCardProps) {
+function OcorrenciaCard({ ocorrencia, valor, onStatusChange, onAprovarGasto, onReprovarGasto, onDelete, onEditValor }: OcorrenciaCardProps) {
   const status = ocorrencia.status ?? "pendente";
   const badge = STATUS_LABEL[status] ?? STATUS_LABEL.pendente;
 
@@ -347,6 +396,14 @@ function OcorrenciaCard({ ocorrencia, onStatusChange, onAprovarGasto, onReprovar
           </div>
 
           <p className="mt-3 text-sm text-foreground">{limparDescricao(ocorrencia.descricao)}</p>
+
+          {valor > 0 && (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-md bg-warning-soft px-3 py-1.5">
+              <Receipt className="h-4 w-4 text-warning" />
+              <span className="text-xs font-medium text-muted-foreground">Valor:</span>
+              <span className="font-display text-base font-bold text-warning">{formatBRL(valor)}</span>
+            </div>
+          )}
 
           <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
             {rotuloOrigem(ocorrencia.telefone).icon === "edit"
@@ -394,12 +451,12 @@ function OcorrenciaCard({ ocorrencia, onStatusChange, onAprovarGasto, onReprovar
           )}
         </div>
 
-        <div className="flex w-full shrink-0 gap-2 md:w-auto md:flex-col">
+        <div className="flex w-full shrink-0 flex-col gap-2 md:w-44">
           <Select
             value={status === "resolvida" ? "concluida" : status}
             onValueChange={(v) => onStatusChange(ocorrencia.id, v)}
           >
-            <SelectTrigger className="w-full md:w-44">
+            <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -411,7 +468,16 @@ function OcorrenciaCard({ ocorrencia, onStatusChange, onAprovarGasto, onReprovar
           <Button
             variant="outline"
             size="sm"
-            className="w-full text-warning hover:bg-warning-soft md:w-44"
+            className="w-full text-primary hover:bg-primary/10"
+            onClick={() => onEditValor(ocorrencia.id, ocorrencia.descricao)}
+          >
+            <DollarSign className="mr-2 h-4 w-4" />
+            {valor > 0 ? "Editar valor" : "Adicionar valor"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full text-warning hover:bg-warning-soft"
             onClick={() => onDelete(ocorrencia.id, ocorrencia.descricao)}
           >
             <Trash2 className="mr-2 h-4 w-4" />

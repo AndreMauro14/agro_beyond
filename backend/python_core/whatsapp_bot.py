@@ -6,10 +6,12 @@ import os
 from dotenv import load_dotenv, find_dotenv
 from redis_cache import adicionar_mensagem, pegar_mensagens, limpar_mensagens
 from whatsapp_state import (
-    set_qr, clear_qr, set_status,
+    set_qr, clear_qr, set_status, set_pair_code, clear_pair_code,
     STATUS_CONNECTED, STATUS_DISCONNECTED, STATUS_PAIRING,
 )
+import json
 import threading
+import redis as redis_lib
 
 load_dotenv(find_dotenv())
 
@@ -81,6 +83,7 @@ def on_connected(client, event):
     print("WHATSAPP CONECTADO COM SUCESSO!")
     print("="*50)
     clear_qr()
+    clear_pair_code()
     set_status(STATUS_CONNECTED)
 
 @client.event(DisconnectedEv)
@@ -116,9 +119,41 @@ def on_message(client, event):
         adicionar_mensagem(telefone, texto)
         agendar_envio(telefone, chat)
 
+PAIR_CMD_QUEUE = "whatsapp:cmd:pair"
+
+def _pair_command_listener():
+    """Escuta a fila Redis e dispara client.PairPhone quando recebe pedido."""
+    r = redis_lib.Redis(
+        host=os.getenv("REDIS_HOST", "localhost"),
+        port=int(os.getenv("REDIS_PORT", 6379)),
+        decode_responses=True,
+    )
+    while True:
+        try:
+            res = r.brpop(PAIR_CMD_QUEUE, timeout=10)
+            if not res:
+                continue
+            _, payload = res
+            data = json.loads(payload)
+            phone = (data.get("phone") or "").strip()
+            if not phone:
+                print("[Pair] Pedido sem phone, ignorado", flush=True)
+                continue
+            print(f"[Pair] Solicitando código para {phone}", flush=True)
+            try:
+                code = client.PairPhone(phone, show_push_notification=True)
+                print(f"[Pair] Código gerado: {code}", flush=True)
+                set_pair_code(code, phone)
+            except Exception as e:
+                print(f"[Pair] Erro ao gerar código: {e!r}", flush=True)
+        except Exception as e:
+            print(f"[Pair listener] erro: {e!r}", flush=True)
+
+
 if __name__ == "__main__":
     print("Manda Cá - WhatsApp Bot")
     print("Iniciando...")
     print(f"Tempo de espera entre mensagens: {TEMPO_ESPERA}s")
     print(f"Filtro de grupo: {GRUPO_MANDACA or '(DESLIGADO — aceita tudo)'}")
+    threading.Thread(target=_pair_command_listener, daemon=True).start()
     client.connect()

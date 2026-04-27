@@ -5,7 +5,10 @@ import { ListGastos } from "@/application/use-cases/gasto/ListGastos";
 import { AprovarGasto } from "@/application/use-cases/gasto/AprovarGasto";
 import { ReprovarGasto } from "@/application/use-cases/gasto/ReprovarGasto";
 import { DeleteGasto } from "@/application/use-cases/gasto/DeleteGasto";
+import { CreateGasto } from "@/application/use-cases/gasto/CreateGasto";
+import { UpdateGasto } from "@/application/use-cases/gasto/UpdateGasto";
 import { GetRelatorioGastos } from "@/application/use-cases/gasto/GetRelatorioGastos";
+import type { CreateGastoInput, UpdateGastoInput } from "@/domain/repositories/IGastoRepository";
 
 const useGastoUseCases = () => {
   return useMemo(() => {
@@ -15,6 +18,8 @@ const useGastoUseCases = () => {
       aprovar: new AprovarGasto(repo),
       reprovar: new ReprovarGasto(repo),
       delete: new DeleteGasto(repo),
+      create: new CreateGasto(repo),
+      update: new UpdateGasto(repo),
       relatorio: new GetRelatorioGastos(repo),
     };
   }, []);
@@ -67,6 +72,34 @@ export function useDeleteGasto() {
       queryClient.invalidateQueries({ queryKey: ["relatorio-por-produto"] });
       queryClient.invalidateQueries({ queryKey: ["relatorio-por-mes"] });
     },
+  });
+}
+
+const invalidateAllGastoQueries = (qc: ReturnType<typeof useQueryClient>) => {
+  qc.invalidateQueries({ queryKey: ["gastos"] });
+  qc.invalidateQueries({ queryKey: ["ocorrencias"] });
+  qc.invalidateQueries({ queryKey: ["relatorio-total"] });
+  qc.invalidateQueries({ queryKey: ["relatorio-por-setor"] });
+  qc.invalidateQueries({ queryKey: ["relatorio-por-produto"] });
+  qc.invalidateQueries({ queryKey: ["relatorio-por-mes"] });
+};
+
+export function useCreateGasto() {
+  const { create } = useGastoUseCases();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateGastoInput) => create.execute(data),
+    onSuccess: () => invalidateAllGastoQueries(queryClient),
+  });
+}
+
+export function useUpdateGasto() {
+  const { update } = useGastoUseCases();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: UpdateGastoInput }) =>
+      update.execute(id, data),
+    onSuccess: () => invalidateAllGastoQueries(queryClient),
   });
 }
 

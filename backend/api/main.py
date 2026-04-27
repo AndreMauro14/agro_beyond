@@ -4,10 +4,11 @@ import uvicorn
 import json
 import subprocess
 import os
+import redis as redis_lib
 from python_core.database import (
     save_ocorrencia, get_ocorrencias, get_ocorrencia_by_id, update_ocorrencia_status,
     delete_ocorrencia,
-    save_gasto, get_gastos, get_gastos_by_ocorrencia, update_gasto_status, delete_gasto,
+    save_gasto, get_gastos, get_gastos_by_ocorrencia, update_gasto_status, delete_gasto, update_gasto,
     get_total_gastos, get_gastos_por_setor,
     get_gastos_por_produto, get_gastos_por_mes,
     save_ganho, get_ganhos, delete_ganho, get_ganhos_por_mes,
@@ -189,6 +190,19 @@ def remover_gasto(id: int):
         return {"success": True}
     raise HTTPException(status_code=404, detail="Gasto nao encontrado")
 
+@app.patch("/gastos/{id}")
+async def editar_gasto(id: int, request: Request):
+    body = await request.json()
+    ok = update_gasto(
+        id,
+        nome_produto=body.get("nome_produto"),
+        valor_unitario=body.get("valor_unitario"),
+        quantidade=body.get("quantidade"),
+    )
+    if ok:
+        return {"success": True}
+    raise HTTPException(status_code=500, detail="Erro ao atualizar gasto")
+
 # ============ GANHOS ============
 
 @app.get("/ganhos")
@@ -252,7 +266,6 @@ bot_process = None
 def startup_event():
     global bot_process
     print("Iniciando WhatsApp Bot em segundo plano...")
-    # Inicia o bot do whatsapp como um processo separado
     bot_path = os.path.join("python_core", "whatsapp_bot.py")
     bot_process = subprocess.Popen(["python", bot_path])
 
@@ -262,6 +275,25 @@ def shutdown_event():
     if bot_process:
         print("Encerrando WhatsApp Bot...")
         bot_process.terminate()
+
+_redis_cmd = redis_lib.Redis(
+    host=os.getenv("REDIS_HOST", "localhost"),
+    port=int(os.getenv("REDIS_PORT", 6379)),
+    decode_responses=True,
+)
+
+@app.post("/whatsapp/pair-phone")
+async def whatsapp_pair_phone(request: Request):
+    """Solicita ao bot que gere um pair code (8 caracteres) pra o telefone informado.
+    O bot é assíncrono: ele recebe via fila Redis, executa client.PairPhone e
+    salva o código no whatsapp_state. O frontend faz polling em /whatsapp/status."""
+    body = await request.json()
+    phone_raw = (body.get("phone") or "").strip()
+    phone_digits = "".join(c for c in phone_raw if c.isdigit())
+    if len(phone_digits) < 10:
+        raise HTTPException(status_code=400, detail="Telefone inválido (mínimo 10 dígitos)")
+    _redis_cmd.lpush("whatsapp:cmd:pair", json.dumps({"phone": phone_digits}))
+    return {"success": True, "phone": phone_digits}
 
 if __name__ == "__main__":
     uvicorn.run("api.main:app", host="127.0.0.1", port=8000, reload=True)

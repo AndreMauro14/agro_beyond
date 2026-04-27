@@ -15,6 +15,7 @@ import {
 } from "@/presentation/hooks/useGastos";
 import { useGanhos, useRelatorioGanhosPorMes } from "@/presentation/hooks/useGanhos";
 import { useTransactions } from "@/presentation/contexts/TransactionContext";
+import { useIsMobile } from "@/presentation/hooks/use-mobile";
 import { cn } from "@/presentation/utils/cn";
 
 const MESES_PT = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
@@ -34,6 +35,7 @@ const CORES_GANHO = ["#2e7d32", "#1c4129", "#15803d", "#16a34a", "#4ade80", "#86
 
 const Index = () => {
   const { setOpen } = useTransactions();
+  const isMobile = useIsMobile();
   const totalGastos = useRelatorioTotal();
   const porSetor = useRelatorioPorSetor();
   const porProduto = useRelatorioPorProduto(5);
@@ -118,12 +120,15 @@ const Index = () => {
           Seu painel
         </h1>
         <p className="mt-2 text-muted-foreground">
-          Entradas, saídas e onde o dinheiro está indo.
+          Resumo de todos os lançamentos feitos até hoje.
         </p>
       </div>
 
       {/* Cards resumo */}
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
+      <p className="mt-6 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Desde o primeiro registro
+      </p>
+      <div className="mt-2 grid gap-4 md:grid-cols-3">
         <CardLucro valor={lucro} loading={loadingAll} />
         <CardSimples
           label="Entradas"
@@ -158,7 +163,7 @@ const Index = () => {
             <TrendingUp className="h-5 w-5 text-success" />
             Onde ganhou dinheiro
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">Cada entrada registrada</p>
+          <p className="mt-1 text-sm text-muted-foreground">Todas as entradas registradas</p>
           <div className="mt-4 rounded-lg bg-card-elevated p-4 shadow-card ring-1 ring-border/40 sm:p-6">
             {ganhos.isLoading ? (
               <Skeleton className="h-40 w-full" />
@@ -188,7 +193,7 @@ const Index = () => {
             <TrendingDown className="h-5 w-5 text-warning" />
             Onde gastou dinheiro
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">Saídas por tipo de atividade</p>
+          <p className="mt-1 text-sm text-muted-foreground">Soma de todas as saídas por tipo</p>
           <div className="mt-4 rounded-lg bg-card-elevated p-4 shadow-card ring-1 ring-border/40 sm:p-6">
             {porSetor.isLoading ? (
               <Skeleton className="h-40 w-full" />
@@ -216,9 +221,9 @@ const Index = () => {
         <section className="mt-8">
           <h2 className="flex items-center gap-2 font-display text-xl font-bold text-primary">
             <BarChart3 className="h-5 w-5 text-primary" />
-            Entradas vs Saídas por mês
+            Como está indo mês a mês
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">Últimos 6 meses</p>
+          <p className="mt-1 text-sm text-muted-foreground">Comparação dos últimos 6 meses</p>
           <div className="mt-4 rounded-lg bg-card-elevated p-4 shadow-card ring-1 ring-border/40 sm:p-6">
             {(gastosPorMes.isLoading || ganhosPorMes.isLoading) ? (
               <Skeleton className="h-60 w-full" />
@@ -227,28 +232,35 @@ const Index = () => {
                 Sem dados suficientes ainda.
               </p>
             ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={dadosMesComparativo} margin={{ top: 20, right: 10, left: 0, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={isMobile ? 280 : 260}>
+                <BarChart
+                  data={dadosMesComparativo}
+                  margin={{ top: isMobile ? 10 : 20, right: 10, left: isMobile ? -16 : 0, bottom: 0 }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" vertical={false} />
-                  <XAxis dataKey="label" fontSize={12} />
-                  <YAxis tickFormatter={(v) => formatBRLCompact(Number(v))} fontSize={12} />
+                  <XAxis dataKey="label" fontSize={isMobile ? 10 : 12} />
+                  <YAxis tickFormatter={(v) => formatBRLCompact(Number(v))} fontSize={isMobile ? 10 : 12} />
                   <Tooltip formatter={(v: number) => formatBRL(v)} />
                   <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
                   <Bar dataKey="entradas" name="Entradas" fill="#2e7d32" radius={[6, 6, 0, 0]}>
-                    <LabelList
-                      dataKey="entradas"
-                      position="top"
-                      formatter={(v: number) => v > 0 ? formatBRLCompact(Number(v)) : ""}
-                      style={{ fontSize: 10, fontWeight: 600, fill: "#2e7d32" }}
-                    />
+                    {!isMobile && (
+                      <LabelList
+                        dataKey="entradas"
+                        position="top"
+                        formatter={(v: number) => v > 0 ? formatBRLCompact(Number(v)) : ""}
+                        style={{ fontSize: 10, fontWeight: 600, fill: "#2e7d32" }}
+                      />
+                    )}
                   </Bar>
                   <Bar dataKey="saidas" name="Saídas" fill="#e68228" radius={[6, 6, 0, 0]}>
-                    <LabelList
-                      dataKey="saidas"
-                      position="top"
-                      formatter={(v: number) => v > 0 ? formatBRLCompact(Number(v)) : ""}
-                      style={{ fontSize: 10, fontWeight: 600, fill: "#c9681f" }}
-                    />
+                    {!isMobile && (
+                      <LabelList
+                        dataKey="saidas"
+                        position="top"
+                        formatter={(v: number) => v > 0 ? formatBRLCompact(Number(v)) : ""}
+                        style={{ fontSize: 10, fontWeight: 600, fill: "#c9681f" }}
+                      />
+                    )}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -261,7 +273,7 @@ const Index = () => {
       {(dadosProduto.length > 0 || porProduto.isLoading) && (
         <section className="mt-8">
           <h2 className="font-display text-xl font-bold text-primary">O que mais gastou</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Produtos que mais consumiram dinheiro</p>
+          <p className="mt-1 text-sm text-muted-foreground">Top 5 produtos de todos os registros</p>
           <div className="mt-4 rounded-lg bg-card-elevated p-4 shadow-card ring-1 ring-border/40 sm:p-6">
             {porProduto.isLoading ? (
               <Skeleton className="h-60 w-full" />

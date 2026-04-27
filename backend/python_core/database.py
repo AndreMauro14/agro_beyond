@@ -276,6 +276,35 @@ def delete_ganho(id: int) -> bool:
         print(f"Erro ao deletar ganho: {e}")
         return False
 
+def update_gasto(id: int, nome_produto: str = None, valor_unitario: float = None, quantidade: int = None) -> bool:
+    """Atualiza campos editáveis do gasto. Recalcula valor_total se valor/qtd mudar."""
+    try:
+        sets = []
+        params = []
+        if nome_produto is not None:
+            sets.append("nome_produto = %s"); params.append(nome_produto)
+        if valor_unitario is not None:
+            sets.append("valor_unitario = %s"); params.append(valor_unitario)
+        if quantidade is not None:
+            sets.append("quantidade = %s"); params.append(quantidade)
+        if valor_unitario is not None or quantidade is not None:
+            sets.append("valor_total = COALESCE(%s, valor_unitario) * COALESCE(%s, quantidade)")
+            params.extend([valor_unitario, quantidade])
+        if not sets:
+            return True
+        params.append(id)
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(f"UPDATE gastos SET {', '.join(sets)} WHERE id = %s", params)
+        updated = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return updated > 0
+    except Exception as e:
+        print(f"Erro ao atualizar gasto: {e}")
+        return False
+
 def delete_gasto(id: int) -> bool:
     try:
         conn = get_connection()

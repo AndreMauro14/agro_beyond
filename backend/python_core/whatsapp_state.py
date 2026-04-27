@@ -55,17 +55,44 @@ def clear_qr() -> None:
     state["qr_expires_at"] = None
     _write(state)
 
+PAIR_CODE_TTL_SECONDS = 90  # WhatsApp pair codes expiram em ~60-90s
+
+def set_pair_code(code: str, phone: str | None = None) -> None:
+    state = _read()
+    state["pair_code"] = code
+    state["pair_code_phone"] = phone
+    state["pair_code_expires_at"] = int(time.time()) + PAIR_CODE_TTL_SECONDS
+    state["status"] = STATUS_PAIRING
+    _write(state)
+
+def clear_pair_code() -> None:
+    state = _read()
+    state["pair_code"] = None
+    state["pair_code_phone"] = None
+    state["pair_code_expires_at"] = None
+    _write(state)
+
 def get_updated_at() -> int | None:
     return _read().get("updated_at")
 
 def snapshot() -> dict:
     state = _read()
+    now = time.time()
+
     qr = state.get("qr")
-    expires = state.get("qr_expires_at") or 0
-    if qr and time.time() >= expires:
+    qr_expires = state.get("qr_expires_at") or 0
+    if qr and now >= qr_expires:
         qr = None
+
+    pair_code = state.get("pair_code")
+    pair_expires = state.get("pair_code_expires_at") or 0
+    if pair_code and now >= pair_expires:
+        pair_code = None
+
     return {
         "status": state.get("status") or STATUS_DISCONNECTED,
         "qr": qr,
+        "pair_code": pair_code,
+        "pair_code_phone": state.get("pair_code_phone") if pair_code else None,
         "updated_at": state.get("updated_at"),
     }
