@@ -8,9 +8,9 @@ __pycache__/
 *.pyc
 
 # Neonize - sessão do WhatsApp
-AgroFlow
-python_core/AgroFlow
+Mandaca
+backend/python_core/Mandaca
 
 # Estado do bot WhatsApp (QR, status)
-python_core/.whatsapp_state.json
-python_core/.whatsapp_state.json.tmp
+backend/python_core/.whatsapp_state.json
+backend/python_core/.whatsapp_state.json.tmp

@@ -1,7 +1,7 @@
 services:
   db:
     image: postgres:15
-    container_name: agro_db
+    container_name: mandaca_db
     restart: always
     env_file:
       - .env
@@ -16,7 +16,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: agro_redis
+    container_name: mandaca_redis
     restart: always
     ports:
       - "6379:6379"
