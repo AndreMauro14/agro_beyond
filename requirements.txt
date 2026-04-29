@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-psycopg2-binary
-neonize
-requests
-python-dotenv
-redis
-google-genai
