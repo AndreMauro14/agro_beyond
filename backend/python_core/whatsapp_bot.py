@@ -3,15 +3,16 @@ from neonize.events import PairStatusEv, MessageEv, ConnectedEv, DisconnectedEv,
 from neonize.utils.message import extract_text
 import requests
 import os
+from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
 from redis_cache import adicionar_mensagem, pegar_mensagens, limpar_mensagens
 from whatsapp_state import (
     set_qr, clear_qr, set_status, set_pair_code, clear_pair_code,
     STATUS_CONNECTED, STATUS_DISCONNECTED, STATUS_PAIRING,
 )
-import json
 import threading
-import redis as redis_lib
+
+PAIR_REQUEST_FILE = Path(__file__).resolve().parent / "pair_request.txt"
 
 load_dotenv(find_dotenv())
 
@@ -62,9 +63,28 @@ def agendar_envio(telefone: str, chat_id: str):
     timers[telefone] = timer
     print(f"[Timer] Agendado envio de {telefone} em {TEMPO_ESPERA}s")
 
+_pending_pair_phone: str | None = None
+
+
 @client.qr
 def on_qr(_client, qr_bytes: bytes):
-    """Callback chamado quando o neonize gera um QR para pareamento."""
+    """Callback chamado quando o neonize gera um QR para pareamento.
+    Se houver telefone pendente (vindo de pair_request.txt), gera pair code
+    em vez de exibir QR — único momento em que o cliente Go já existe e o
+    modo de pareamento ainda não foi fechado."""
+    global _pending_pair_phone
+    if _pending_pair_phone:
+        phone = _pending_pair_phone
+        _pending_pair_phone = None
+        print(f"[Pair] Solicitando código para {phone} no callback on_qr...", flush=True)
+        try:
+            code = _client.PairPhone(phone, show_push_notification=True)
+            print(f"[Pair] Código gerado: {code}", flush=True)
+            set_pair_code(code, phone)
+        except Exception as e:
+            print(f"[Pair] Erro ao gerar código: {e!r}", flush=True)
+        return
+
     qr_string = qr_bytes.decode("utf-8", errors="ignore").strip()
     print(f"[QR] Novo QR code recebido (len={len(qr_string)})", flush=True)
     set_qr(qr_string)
@@ -119,35 +139,21 @@ def on_message(client, event):
         adicionar_mensagem(telefone, texto)
         agendar_envio(telefone, chat)
 
-PAIR_CMD_QUEUE = "whatsapp:cmd:pair"
-
-def _pair_command_listener():
-    """Escuta a fila Redis e dispara client.PairPhone quando recebe pedido."""
-    r = redis_lib.Redis(
-        host=os.getenv("REDIS_HOST", "localhost"),
-        port=int(os.getenv("REDIS_PORT", 6379)),
-        decode_responses=True,
-    )
-    while True:
+def _consume_pair_request() -> str | None:
+    """Lê e remove o arquivo de solicitação de pair code, se existir."""
+    if not PAIR_REQUEST_FILE.exists():
+        return None
+    try:
+        phone = PAIR_REQUEST_FILE.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        print(f"[Pair] Erro lendo {PAIR_REQUEST_FILE}: {e!r}", flush=True)
+        return None
+    finally:
         try:
-            res = r.brpop(PAIR_CMD_QUEUE, timeout=10)
-            if not res:
-                continue
-            _, payload = res
-            data = json.loads(payload)
-            phone = (data.get("phone") or "").strip()
-            if not phone:
-                print("[Pair] Pedido sem phone, ignorado", flush=True)
-                continue
-            print(f"[Pair] Solicitando código para {phone}", flush=True)
-            try:
-                code = client.PairPhone(phone, show_push_notification=True)
-                print(f"[Pair] Código gerado: {code}", flush=True)
-                set_pair_code(code, phone)
-            except Exception as e:
-                print(f"[Pair] Erro ao gerar código: {e!r}", flush=True)
-        except Exception as e:
-            print(f"[Pair listener] erro: {e!r}", flush=True)
+            PAIR_REQUEST_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+    return phone or None
 
 
 if __name__ == "__main__":
@@ -155,5 +161,9 @@ if __name__ == "__main__":
     print("Iniciando...")
     print(f"Tempo de espera entre mensagens: {TEMPO_ESPERA}s")
     print(f"Filtro de grupo: {GRUPO_MANDACA or '(DESLIGADO — aceita tudo)'}")
-    threading.Thread(target=_pair_command_listener, daemon=True).start()
+
+    _pending_pair_phone = _consume_pair_request()
+    if _pending_pair_phone:
+        print(f"[Pair] Pair code pendente para {_pending_pair_phone} — será gerado no callback on_qr", flush=True)
+
     client.connect()

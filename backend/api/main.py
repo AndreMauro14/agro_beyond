@@ -3,8 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import json
 import subprocess
+import sys
 import os
-import redis as redis_lib
+from pathlib import Path
 from python_core.database import (
     save_ocorrencia, get_ocorrencias, get_ocorrencia_by_id, update_ocorrencia_status,
     delete_ocorrencia,
@@ -261,39 +262,60 @@ def whatsapp_status():
     return whatsapp_snapshot()
 
 bot_process = None
+BOT_PATH = os.path.join("python_core", "whatsapp_bot.py")
+PAIR_REQUEST_FILE = Path("python_core") / "pair_request.txt"
+
+
+def _start_bot():
+    global bot_process
+    print("Iniciando WhatsApp Bot em segundo plano...")
+    bot_process = subprocess.Popen([sys.executable, BOT_PATH])
+
+
+def _stop_bot(timeout: float = 5.0):
+    global bot_process
+    if not bot_process:
+        return
+    print("Encerrando WhatsApp Bot...")
+    bot_process.terminate()
+    try:
+        bot_process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print("Bot não respondeu ao terminate, matando...")
+        bot_process.kill()
+        bot_process.wait()
+    bot_process = None
+
 
 @app.on_event("startup")
 def startup_event():
-    global bot_process
-    print("Iniciando WhatsApp Bot em segundo plano...")
-    bot_path = os.path.join("python_core", "whatsapp_bot.py")
-    bot_process = subprocess.Popen(["python", bot_path])
+    _start_bot()
+
 
 @app.on_event("shutdown")
 def shutdown_event():
-    global bot_process
-    if bot_process:
-        print("Encerrando WhatsApp Bot...")
-        bot_process.terminate()
+    _stop_bot()
 
-_redis_cmd = redis_lib.Redis(
-    host=os.getenv("REDIS_HOST", "localhost"),
-    port=int(os.getenv("REDIS_PORT", 6379)),
-    decode_responses=True,
-)
 
 @app.post("/whatsapp/pair-phone")
 async def whatsapp_pair_phone(request: Request):
-    """Solicita ao bot que gere um pair code (8 caracteres) pra o telefone informado.
-    O bot é assíncrono: ele recebe via fila Redis, executa client.PairPhone e
-    salva o código no whatsapp_state. O frontend faz polling em /whatsapp/status."""
+    """Pareamento por número: grava o telefone num arquivo de estado e
+    reinicia o bot. No próximo startup ele chama client.PairPhone() ANTES
+    de connect() (única ordem aceita pelo neonize) e salva o código de 8
+    caracteres no whatsapp_state. Frontend faz polling em /whatsapp/status."""
     body = await request.json()
     phone_raw = (body.get("phone") or "").strip()
     phone_digits = "".join(c for c in phone_raw if c.isdigit())
     if len(phone_digits) < 10:
         raise HTTPException(status_code=400, detail="Telefone inválido (mínimo 10 dígitos)")
-    _redis_cmd.lpush("whatsapp:cmd:pair", json.dumps({"phone": phone_digits}))
-    return {"success": True, "phone": phone_digits}
+
+    PAIR_REQUEST_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PAIR_REQUEST_FILE.write_text(phone_digits, encoding="utf-8")
+
+    _stop_bot()
+    _start_bot()
+
+    return {"success": True, "phone": phone_digits, "restarted": True}
 
 if __name__ == "__main__":
     uvicorn.run("api.main:app", host="127.0.0.1", port=8000, reload=True)
