@@ -8,15 +8,49 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
+const TOKEN_KEY = "mandaca:auth_token";
+
+export function getAuthToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setAuthToken(token: string | null): void {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+type UnauthorizedHandler = () => void;
+let onUnauthorized: UnauthorizedHandler | null = null;
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  onUnauthorized = handler;
+}
+
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const { method = "GET", body, signal } = opts;
 
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getAuthToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
   const response = await fetch(`${API_URL}${path}`, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal,
   });
+
+  if (response.status === 401) {
+    setAuthToken(null);
+    if (onUnauthorized) onUnauthorized();
+  }
 
   if (!response.ok) {
     let detail: string | undefined;
