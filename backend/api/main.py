@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import json
@@ -13,10 +13,13 @@ from python_core.database import (
     get_total_gastos, get_gastos_por_setor,
     get_gastos_por_produto, get_gastos_por_mes,
     save_ganho, get_ganhos, delete_ganho, get_ganhos_por_mes,
+    get_usuario_by_telefone,
 )
 from python_core.gemini_service import analisar_mensagem, GEMINI_ENABLED
 from python_core.parser import analisar_com_regex
 from python_core.whatsapp_state import snapshot as whatsapp_snapshot
+from python_core.auth import get_current_user
+from api.auth_routes import router as auth_router
 
 app = FastAPI(title="Mandaca API", version="1.0.0")
 
@@ -27,6 +30,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
 
 @app.get("/")
 def home():
@@ -49,11 +54,15 @@ async def receber_whatsapp(request: Request):
     if not (telefone and texto):
         return {"status": "recebido"}
 
-    # 1) tenta parser regex (grátis, rápido)
+    usuario = get_usuario_by_telefone(telefone)
+    if not usuario:
+        print(f"[Webhook] Telefone {telefone} não vinculado a nenhum usuário — ignorando")
+        return {"status": "ignorado", "motivo": "telefone_nao_vinculado"}
+    usuario_id = usuario["id"]
+
     analise = analisar_com_regex(texto)
     fonte = "regex" if analise else None
 
-    # 2) fallback Gemini se o regex não casou e a flag tá ligada
     if not analise and GEMINI_ENABLED:
         resultado_raw = analisar_mensagem(texto)
         try:
@@ -63,16 +72,14 @@ async def receber_whatsapp(request: Request):
             analise = None
 
     if not analise or analise.get("tipo") == "indefinido":
-        # nenhum parser identificou → salva como ocorrência bruta pendente
-        id_oc = save_ocorrencia(telefone, texto, foto_url, setor=None, status="pendente")
+        id_oc = save_ocorrencia(usuario_id, telefone, texto, foto_url, setor=None, status="pendente")
         return {"status": "recebido", "tipo": "indefinido", "id_ocorrencia": id_oc}
 
     tipo = analise.get("tipo")
     descricao = analise.get("descricao", texto)
     setor = analise.get("setor")
 
-    # quando identificou: ocorrência já entra como "concluida" pra agilizar
-    id_oc = save_ocorrencia(telefone, descricao, foto_url, setor, status="concluida")
+    id_oc = save_ocorrencia(usuario_id, telefone, descricao, foto_url, setor, status="concluida")
     print(f"[Webhook] Ocorrência salva (fonte={fonte}): ID={id_oc}, tipo={tipo}, setor={setor}")
 
     id_gasto = None
@@ -83,7 +90,7 @@ async def receber_whatsapp(request: Request):
 
         if produto and valor_unitario:
             id_gasto = save_gasto(
-                id_oc, produto, float(valor_unitario), int(quantidade),
+                usuario_id, id_oc, produto, float(valor_unitario), int(quantidade),
                 status_aprovacao="aprovado",
             )
             print(f"[Webhook] Gasto salvo (aprovado): ID={id_gasto}, produto={produto}")
@@ -99,54 +106,54 @@ async def receber_whatsapp(request: Request):
 # ============ OCORRENCIAS ============
 
 @app.get("/ocorrencias")
-def listar_ocorrencias():
-    return get_ocorrencias()
+def listar_ocorrencias(user = Depends(get_current_user)):
+    return get_ocorrencias(user["id"])
 
 @app.get("/ocorrencias/{id}")
-def buscar_ocorrencia(id: int):
-    oc = get_ocorrencia_by_id(id)
+def buscar_ocorrencia(id: int, user = Depends(get_current_user)):
+    oc = get_ocorrencia_by_id(id, user["id"])
     if oc:
-        oc["gastos"] = get_gastos_by_ocorrencia(id)
+        oc["gastos"] = get_gastos_by_ocorrencia(id, user["id"])
         return oc
     raise HTTPException(status_code=404, detail="Ocorrencia nao encontrada")
 
 @app.patch("/ocorrencias/{id}/status")
-async def atualizar_status_ocorrencia(id: int, request: Request):
+async def atualizar_status_ocorrencia(id: int, request: Request, user = Depends(get_current_user)):
     body = await request.json()
     status = body.get("status")
-    if update_ocorrencia_status(id, status):
+    if update_ocorrencia_status(id, status, user["id"]):
         return {"success": True}
-    raise HTTPException(status_code=500, detail="Erro ao atualizar")
+    raise HTTPException(status_code=404, detail="Ocorrencia nao encontrada")
 
 @app.delete("/ocorrencias/{id}")
-def remover_ocorrencia(id: int):
-    if delete_ocorrencia(id):
+def remover_ocorrencia(id: int, user = Depends(get_current_user)):
+    if delete_ocorrencia(id, user["id"]):
         return {"success": True}
     raise HTTPException(status_code=404, detail="Ocorrencia nao encontrada")
 
 # ============ GASTOS ============
 
 @app.get("/gastos")
-def listar_gastos():
-    return get_gastos()
+def listar_gastos(user = Depends(get_current_user)):
+    return get_gastos(user["id"])
 
 @app.post("/gastos")
-async def criar_gasto(request: Request):
+async def criar_gasto(request: Request, user = Depends(get_current_user)):
     body = await request.json()
     id = save_gasto(
+        usuario_id=user["id"],
         id_ocorrencia=body.get("id_ocorrencia"),
         nome_produto=body.get("nome_produto"),
         valor_unitario=body.get("valor_unitario"),
-        quantidade=body.get("quantidade", 1)
+        quantidade=body.get("quantidade", 1),
     )
     if id:
         return {"success": True, "id": id}
     raise HTTPException(status_code=500, detail="Erro ao salvar gasto")
 
 @app.post("/gastos/manual")
-async def criar_gasto_manual(request: Request):
-    """Lançamento manual de saída via formulário do /caixa.
-    Cria uma ocorrência sintética + gasto aprovado."""
+async def criar_gasto_manual(request: Request, user = Depends(get_current_user)):
+    """Lançamento manual de saída via formulário do /caixa."""
     body = await request.json()
     descricao = body.get("descricao")
     valor = body.get("valor")
@@ -155,6 +162,7 @@ async def criar_gasto_manual(request: Request):
         raise HTTPException(status_code=400, detail="descricao e valor são obrigatórios")
 
     id_oc = save_ocorrencia(
+        usuario_id=user["id"],
         telefone="manual",
         descricao=f"[Manual] {descricao}",
         foto_url=None,
@@ -165,6 +173,7 @@ async def criar_gasto_manual(request: Request):
         raise HTTPException(status_code=500, detail="Erro ao criar ocorrência")
 
     id_gasto = save_gasto(
+        usuario_id=user["id"],
         id_ocorrencia=id_oc,
         nome_produto=descricao,
         valor_unitario=float(valor),
@@ -174,50 +183,52 @@ async def criar_gasto_manual(request: Request):
     return {"success": True, "id_ocorrencia": id_oc, "id_gasto": id_gasto}
 
 @app.patch("/gastos/{id}/aprovar")
-def aprovar_gasto(id: int):
-    if update_gasto_status(id, "aprovado"):
+def aprovar_gasto(id: int, user = Depends(get_current_user)):
+    if update_gasto_status(id, "aprovado", user["id"]):
         return {"success": True, "status": "aprovado"}
-    raise HTTPException(status_code=500, detail="Erro ao aprovar")
+    raise HTTPException(status_code=404, detail="Gasto nao encontrado")
 
 @app.patch("/gastos/{id}/reprovar")
-def reprovar_gasto(id: int):
-    if update_gasto_status(id, "reprovado"):
+def reprovar_gasto(id: int, user = Depends(get_current_user)):
+    if update_gasto_status(id, "reprovado", user["id"]):
         return {"success": True, "status": "reprovado"}
-    raise HTTPException(status_code=500, detail="Erro ao reprovar")
+    raise HTTPException(status_code=404, detail="Gasto nao encontrado")
 
 @app.delete("/gastos/{id}")
-def remover_gasto(id: int):
-    if delete_gasto(id):
+def remover_gasto(id: int, user = Depends(get_current_user)):
+    if delete_gasto(id, user["id"]):
         return {"success": True}
     raise HTTPException(status_code=404, detail="Gasto nao encontrado")
 
 @app.patch("/gastos/{id}")
-async def editar_gasto(id: int, request: Request):
+async def editar_gasto(id: int, request: Request, user = Depends(get_current_user)):
     body = await request.json()
     ok = update_gasto(
         id,
+        user["id"],
         nome_produto=body.get("nome_produto"),
         valor_unitario=body.get("valor_unitario"),
         quantidade=body.get("quantidade"),
     )
     if ok:
         return {"success": True}
-    raise HTTPException(status_code=500, detail="Erro ao atualizar gasto")
+    raise HTTPException(status_code=404, detail="Gasto nao encontrado")
 
 # ============ GANHOS ============
 
 @app.get("/ganhos")
-def listar_ganhos():
-    return get_ganhos()
+def listar_ganhos(user = Depends(get_current_user)):
+    return get_ganhos(user["id"])
 
 @app.post("/ganhos")
-async def criar_ganho(request: Request):
+async def criar_ganho(request: Request, user = Depends(get_current_user)):
     body = await request.json()
     descricao = body.get("descricao")
     valor = body.get("valor")
     if not descricao or valor is None:
         raise HTTPException(status_code=400, detail="descricao e valor são obrigatórios")
     id = save_ganho(
+        usuario_id=user["id"],
         descricao=descricao,
         valor=float(valor),
         categoria=body.get("categoria"),
@@ -228,37 +239,37 @@ async def criar_ganho(request: Request):
     raise HTTPException(status_code=500, detail="Erro ao salvar ganho")
 
 @app.delete("/ganhos/{id}")
-def remover_ganho(id: int):
-    if delete_ganho(id):
+def remover_ganho(id: int, user = Depends(get_current_user)):
+    if delete_ganho(id, user["id"]):
         return {"success": True}
     raise HTTPException(status_code=404, detail="Ganho nao encontrado")
 
 # ============ RELATORIOS ============
 
 @app.get("/relatorios/total")
-def relatorio_total():
-    return {"total_gastos": get_total_gastos()}
+def relatorio_total(user = Depends(get_current_user)):
+    return {"total_gastos": get_total_gastos(user["id"])}
 
 @app.get("/relatorios/por-setor")
-def relatorio_por_setor():
-    return get_gastos_por_setor()
+def relatorio_por_setor(user = Depends(get_current_user)):
+    return get_gastos_por_setor(user["id"])
 
 @app.get("/relatorios/por-produto")
-def relatorio_por_produto(limit: int = 5):
-    return get_gastos_por_produto(limit=limit)
+def relatorio_por_produto(limit: int = 5, user = Depends(get_current_user)):
+    return get_gastos_por_produto(user["id"], limit=limit)
 
 @app.get("/relatorios/por-mes")
-def relatorio_por_mes(meses: int = 6):
-    return get_gastos_por_mes(meses=meses)
+def relatorio_por_mes(meses: int = 6, user = Depends(get_current_user)):
+    return get_gastos_por_mes(user["id"], meses=meses)
 
 @app.get("/relatorios/ganhos-por-mes")
-def relatorio_ganhos_por_mes(meses: int = 6):
-    return get_ganhos_por_mes(meses=meses)
+def relatorio_ganhos_por_mes(meses: int = 6, user = Depends(get_current_user)):
+    return get_ganhos_por_mes(user["id"], meses=meses)
 
 # ============ WHATSAPP ============
 
 @app.get("/whatsapp/status")
-def whatsapp_status():
+def whatsapp_status(user = Depends(get_current_user)):
     return whatsapp_snapshot()
 
 bot_process = None
@@ -298,11 +309,8 @@ def shutdown_event():
 
 
 @app.post("/whatsapp/pair-phone")
-async def whatsapp_pair_phone(request: Request):
-    """Pareamento por número: grava o telefone num arquivo de estado e
-    reinicia o bot. No próximo startup ele chama client.PairPhone() ANTES
-    de connect() (única ordem aceita pelo neonize) e salva o código de 8
-    caracteres no whatsapp_state. Frontend faz polling em /whatsapp/status."""
+async def whatsapp_pair_phone(request: Request, user = Depends(get_current_user)):
+    """Admin: pareamento por número (do bot do sistema)."""
     body = await request.json()
     phone_raw = (body.get("phone") or "").strip()
     phone_digits = "".join(c for c in phone_raw if c.isdigit())
@@ -319,4 +327,3 @@ async def whatsapp_pair_phone(request: Request):
 
 if __name__ == "__main__":
     uvicorn.run("api.main:app", host="127.0.0.1", port=8000, reload=True)
-
