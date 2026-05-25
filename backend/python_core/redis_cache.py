@@ -50,3 +50,47 @@ def tempo_restante(telefone: str):
     """Retorna quantos segundos faltam pra expirar"""
     chave = f"chat:{telefone}"
     return redis_client.ttl(chave)
+
+# ============ OUTBOX (mensagens que a API quer que o bot envie) ============
+
+OUTBOX_KEY = "whatsapp:outbox"
+
+def enfileirar_envio(telefone: str, texto: str) -> None:
+    """API enfileira uma mensagem pro bot enviar via WhatsApp."""
+    import json as _json
+    payload = _json.dumps({"telefone": telefone, "texto": texto})
+    redis_client.lpush(OUTBOX_KEY, payload)
+
+def consumir_envio(timeout: int = 5):
+    """Bot consome a próxima mensagem da fila (bloqueante). Retorna dict ou None."""
+    import json as _json
+    item = redis_client.brpop(OUTBOX_KEY, timeout=timeout)
+    if not item:
+        return None
+    _, raw = item
+    try:
+        return _json.loads(raw)
+    except Exception:
+        return None
+
+# ============ CODIGOS DE VERIFICACAO WHATSAPP ============
+
+def salvar_codigo_verificacao(usuario_id: int, telefone: str, codigo: str, ttl: int = 600) -> None:
+    """Salva código de verificação por (telefone, usuario_id). TTL em segundos."""
+    chave = f"verify:{telefone}"
+    redis_client.setex(chave, ttl, f"{usuario_id}:{codigo}")
+
+def validar_codigo_verificacao(telefone: str, codigo: str):
+    """Retorna usuario_id se o código bate, senão None. Consome em caso de sucesso."""
+    chave = f"verify:{telefone}"
+    armazenado = redis_client.get(chave)
+    if not armazenado:
+        return None
+    try:
+        uid_str, code = armazenado.split(":", 1)
+    except ValueError:
+        return None
+    if code != codigo.strip():
+        return None
+    redis_client.delete(chave)
+    return int(uid_str)

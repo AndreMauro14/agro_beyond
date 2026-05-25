@@ -5,7 +5,7 @@ import requests
 import os
 from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
-from redis_cache import adicionar_mensagem, pegar_mensagens, limpar_mensagens
+from redis_cache import adicionar_mensagem, pegar_mensagens, limpar_mensagens, consumir_envio
 from whatsapp_state import (
     set_qr, clear_qr, set_status, set_pair_code, clear_pair_code,
     STATUS_CONNECTED, STATUS_DISCONNECTED, STATUS_PAIRING,
@@ -105,6 +105,30 @@ def on_connected(client, event):
     clear_qr()
     clear_pair_code()
     set_status(STATUS_CONNECTED)
+    threading.Thread(target=_outbox_worker, args=(client,), daemon=True).start()
+
+
+def _outbox_worker(client):
+    """Consome a fila Redis 'whatsapp:outbox' e envia via Neonize."""
+    from neonize.utils.jid import build_jid
+    print("[Outbox] Worker iniciado", flush=True)
+    while True:
+        try:
+            item = consumir_envio(timeout=10)
+            if not item:
+                continue
+            telefone = "".join(c for c in str(item.get("telefone", "")) if c.isdigit())
+            texto = item.get("texto", "")
+            if not telefone or not texto:
+                continue
+            try:
+                jid = build_jid(telefone)
+                client.send_message(jid, texto)
+                print(f"[Outbox] Enviado para {telefone}", flush=True)
+            except Exception as e:
+                print(f"[Outbox] Erro ao enviar para {telefone}: {e!r}", flush=True)
+        except Exception as e:
+            print(f"[Outbox] Erro no loop: {e!r}", flush=True)
 
 @client.event(DisconnectedEv)
 def on_disconnected(client, event):
