@@ -65,6 +65,21 @@ def get_usuario_by_id(id: int):
         print(f"Erro ao buscar usuário: {e}")
         return None
 
+def get_first_usuario():
+    """Retorna o usuário com menor id (admin/primeiro cadastrado).
+    Usado pelo webhook como destino default das mensagens recebidas."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT id, email, nome FROM usuarios ORDER BY id ASC LIMIT 1")
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"Erro ao buscar primeiro usuário: {e}")
+        return None
+
 def get_usuario_by_telefone(telefone: str):
     try:
         conn = get_connection()

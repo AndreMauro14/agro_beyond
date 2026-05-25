@@ -14,20 +14,6 @@ export class AuthApiRepository implements IAuthRepository {
   me() {
     return httpClient.get<Usuario>("/auth/me");
   }
-
-  requestVincularWhatsapp(telefone: string) {
-    return httpClient.post<{ telefone: string; expira_em_segundos: number }>(
-      "/auth/vincular-whatsapp/request",
-      { telefone },
-    );
-  }
-
-  verifyVincularWhatsapp(telefone: string, codigo: string) {
-    return httpClient.post<{ telefone_whatsapp: string }>(
-      "/auth/vincular-whatsapp/verify",
-      { telefone, codigo },
-    );
-  }
 }
 
 export const authRepository = new AuthApiRepository();

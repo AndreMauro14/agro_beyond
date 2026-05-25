@@ -25,7 +25,7 @@ export default function Registro() {
     try {
       await register(email.trim(), senha, nome.trim() || undefined);
       toast.success("Conta criada com sucesso!");
-      navigate("/vincular-whatsapp", { replace: true });
+      navigate("/", { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao criar conta");
     } finally {

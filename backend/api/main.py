@@ -13,7 +13,7 @@ from python_core.database import (
     get_total_gastos, get_gastos_por_setor,
     get_gastos_por_produto, get_gastos_por_mes,
     save_ganho, get_ganhos, delete_ganho, get_ganhos_por_mes,
-    get_usuario_by_telefone,
+    get_first_usuario,
 )
 from python_core.gemini_service import analisar_mensagem, GEMINI_ENABLED
 from python_core.parser import analisar_com_regex
@@ -54,10 +54,10 @@ async def receber_whatsapp(request: Request):
     if not (telefone and texto):
         return {"status": "recebido"}
 
-    usuario = get_usuario_by_telefone(telefone)
+    usuario = get_first_usuario()
     if not usuario:
-        print(f"[Webhook] Telefone {telefone} não vinculado a nenhum usuário — ignorando")
-        return {"status": "ignorado", "motivo": "telefone_nao_vinculado"}
+        print(f"[Webhook] Nenhum usuário cadastrado — ignorando mensagem de {telefone}")
+        return {"status": "ignorado", "motivo": "nenhum_usuario"}
     usuario_id = usuario["id"]
 
     analise = analisar_com_regex(texto)

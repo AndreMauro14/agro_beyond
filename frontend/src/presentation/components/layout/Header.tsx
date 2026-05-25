@@ -10,8 +10,7 @@ const navItems = [
   { to: "/caixa", label: "Controle de Caixa" },
   { to: "/ocorrencias", label: "Ocorrências" },
   { to: "/calculadora", label: "Calculadora" },
-  { to: "/vincular-whatsapp", label: "Meu WhatsApp" },
-  { to: "/conectar", label: "Conectar Bot" },
+  { to: "/conectar", label: "Conectar WhatsApp" },
 ];
 
 export default function Header() {

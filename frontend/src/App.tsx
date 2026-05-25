@@ -14,7 +14,6 @@ import Ocorrencias from "@/presentation/pages/Ocorrencias";
 import Conectar from "@/presentation/pages/Conectar";
 import Login from "@/presentation/pages/Login";
 import Registro from "@/presentation/pages/Registro";
-import VincularWhatsapp from "@/presentation/pages/VincularWhatsapp";
 import NotFound from "@/presentation/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -36,7 +35,6 @@ const App = () => (
                   <Route path="/caixa" element={<Caixa />} />
                   <Route path="/calculadora" element={<Calculadora />} />
                   <Route path="/ocorrencias" element={<Ocorrencias />} />
-                  <Route path="/vincular-whatsapp" element={<VincularWhatsapp />} />
                   <Route path="/conectar" element={<Conectar />} />
                 </Route>
               </Route>
