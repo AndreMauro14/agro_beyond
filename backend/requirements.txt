@@ -6,3 +6,6 @@ requests
 python-dotenv
 redis
 google-genai
+passlib[bcrypt]
+python-jose[cryptography]
+email-validator
