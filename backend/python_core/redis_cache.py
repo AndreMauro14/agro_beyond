@@ -4,11 +4,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-redis_client = redis.Redis(
-    host=os.getenv("REDIS_HOST", "localhost"),
-    port=int(os.getenv("REDIS_PORT", 6379)),
-    decode_responses=True
-)
+REDIS_URL = os.getenv("REDIS_URL")
+
+if REDIS_URL:
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+else:
+    redis_client = redis.Redis(
+        host=os.getenv("REDIS_HOST", "localhost"),
+        port=int(os.getenv("REDIS_PORT", 6379)),
+        decode_responses=True
+    )
 
 TEMPO_ESPERA = int(os.getenv("MESSAGE_BUFFER_SECONDS", "20"))
 # TTL do Redis precisa ser maior que o timer pra evitar que o buffer expire

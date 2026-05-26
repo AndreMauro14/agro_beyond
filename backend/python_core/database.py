@@ -6,6 +6,8 @@ from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "localhost"),
     "port": int(os.getenv("DB_PORT", 5432)),
@@ -15,6 +17,8 @@ DB_CONFIG = {
 }
 
 def get_connection():
+    if DATABASE_URL:
+        return psycopg2.connect(DATABASE_URL, sslmode="require")
     return psycopg2.connect(**DB_CONFIG)
 
 # ============ USUARIOS ============

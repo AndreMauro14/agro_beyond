@@ -16,7 +16,8 @@ PAIR_REQUEST_FILE = Path(__file__).resolve().parent / "pair_request.txt"
 
 load_dotenv(find_dotenv())
 
-API_URL = os.getenv("API_URL", "http://localhost:8000/webhook")
+_DEFAULT_PORT = os.getenv("PORT", "8000")
+API_URL = os.getenv("API_URL", f"http://localhost:{_DEFAULT_PORT}/webhook")
 TEMPO_ESPERA = int(os.getenv("MESSAGE_BUFFER_SECONDS", "20"))
 
 # ID do chat/grupo permitido. Se vazio (""), aceita tudo (modo dev).
@@ -131,8 +132,12 @@ def on_message(client, event):
     print(f"Texto: {texto}")
     print("-"*30)
 
-    if GRUPO_MANDACA is not None and GRUPO_MANDACA not in chat and GRUPO_MANDACA not in telefone:
-        print(f"[Filtro] Ignorando chat={chat[:40]!r}: fora do grupo {GRUPO_MANDACA}", flush=True)
+    # Só aceita mensagens cujo CHAT contém o ID do grupo configurado.
+    # Importante: NÃO checar contra `telefone` aqui (Sender.User), pois o LID
+    # do remetente em chat privado pode coincidir com o ID do grupo e furar
+    # o filtro deixando passar privados de membros do grupo.
+    if GRUPO_MANDACA is not None and GRUPO_MANDACA not in chat:
+        print(f"[Filtro] Ignorando chat (sender={telefone}): fora do grupo {GRUPO_MANDACA}", flush=True)
         return
 
     if texto:
