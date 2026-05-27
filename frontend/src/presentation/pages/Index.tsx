@@ -110,6 +110,9 @@ const Index = () => {
   const maxGanhoItem = dadosGanhoPorItem.length > 0
     ? Math.max(...dadosGanhoPorItem.map((x) => x.total))
     : 0;
+  const maxProduto = dadosProduto.length > 0
+    ? Math.max(...dadosProduto.map((x) => x.total))
+    : 0;
 
   const loadingAll = totalGastos.isLoading && porSetor.isLoading && ganhos.isLoading;
 
@@ -232,38 +235,55 @@ const Index = () => {
                 Sem dados suficientes ainda.
               </p>
             ) : (
-              <ResponsiveContainer width="100%" height={isMobile ? 280 : 260}>
-                <BarChart
-                  data={dadosMesComparativo}
-                  margin={{ top: isMobile ? 10 : 20, right: 10, left: isMobile ? -16 : 0, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" vertical={false} />
-                  <XAxis dataKey="label" fontSize={isMobile ? 10 : 12} />
-                  <YAxis tickFormatter={(v) => formatBRLCompact(Number(v))} fontSize={isMobile ? 10 : 12} />
-                  <Tooltip formatter={(v: number) => formatBRL(v)} />
-                  <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
-                  <Bar dataKey="entradas" name="Entradas" fill="#2e7d32" radius={[6, 6, 0, 0]}>
-                    {!isMobile && (
-                      <LabelList
-                        dataKey="entradas"
-                        position="top"
-                        formatter={(v: number) => v > 0 ? formatBRLCompact(Number(v)) : ""}
-                        style={{ fontSize: 10, fontWeight: 600, fill: "#2e7d32" }}
-                      />
-                    )}
-                  </Bar>
-                  <Bar dataKey="saidas" name="Saídas" fill="#e68228" radius={[6, 6, 0, 0]}>
-                    {!isMobile && (
-                      <LabelList
-                        dataKey="saidas"
-                        position="top"
-                        formatter={(v: number) => v > 0 ? formatBRLCompact(Number(v)) : ""}
-                        style={{ fontSize: 10, fontWeight: 600, fill: "#c9681f" }}
-                      />
-                    )}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <>
+                <ResponsiveContainer width="100%" height={isMobile ? 220 : 260}>
+                  <BarChart
+                    data={dadosMesComparativo}
+                    margin={{ top: isMobile ? 10 : 20, right: 10, left: isMobile ? -16 : 0, bottom: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" vertical={false} />
+                    <XAxis dataKey="label" fontSize={isMobile ? 10 : 12} />
+                    <YAxis tickFormatter={(v) => formatBRLCompact(Number(v))} fontSize={isMobile ? 10 : 12} />
+                    <Tooltip formatter={(v: number) => formatBRL(v)} />
+                    <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+                    <Bar dataKey="entradas" name="Entradas" fill="#2e7d32" radius={[6, 6, 0, 0]}>
+                      {!isMobile && (
+                        <LabelList
+                          dataKey="entradas"
+                          position="top"
+                          formatter={(v: number) => v > 0 ? formatBRLCompact(Number(v)) : ""}
+                          style={{ fontSize: 10, fontWeight: 600, fill: "#2e7d32" }}
+                        />
+                      )}
+                    </Bar>
+                    <Bar dataKey="saidas" name="Saídas" fill="#e68228" radius={[6, 6, 0, 0]}>
+                      {!isMobile && (
+                        <LabelList
+                          dataKey="saidas"
+                          position="top"
+                          formatter={(v: number) => v > 0 ? formatBRLCompact(Number(v)) : ""}
+                          style={{ fontSize: 10, fontWeight: 600, fill: "#c9681f" }}
+                        />
+                      )}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+
+                {isMobile && (
+                  <div className="mt-4 space-y-2 border-t border-border/60 pt-3">
+                    {dadosMesComparativo.map((m) => (
+                      <div key={m.label} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-semibold text-foreground">{m.label}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="font-medium text-success">{formatBRL(m.entradas)}</span>
+                          <span className="text-muted-foreground">·</span>
+                          <span className="font-medium text-warning">{formatBRL(m.saidas)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </section>
@@ -277,6 +297,19 @@ const Index = () => {
           <div className="mt-4 rounded-lg bg-card-elevated p-4 shadow-card ring-1 ring-border/40 sm:p-6">
             {porProduto.isLoading ? (
               <Skeleton className="h-60 w-full" />
+            ) : isMobile ? (
+              <div className="space-y-3">
+                {dadosProduto.map((d, i) => (
+                  <BarraCategoria
+                    key={d.produto}
+                    label={d.produto}
+                    valor={d.total}
+                    max={maxProduto}
+                    cor={CORES_GASTO[i % CORES_GASTO.length]}
+                    corTexto="text-warning"
+                  />
+                ))}
+              </div>
             ) : (
               <ResponsiveContainer width="100%" height={Math.max(200, dadosProduto.length * 50)}>
                 <BarChart data={dadosProduto} layout="vertical" margin={{ left: 10, right: 40 }}>

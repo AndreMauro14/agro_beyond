@@ -197,7 +197,8 @@ export default function Caixa() {
       <section className="mt-10">
         <h2 className="font-display text-xl font-bold text-primary">Lançamentos do período</h2>
 
-        <div className="mt-4 overflow-hidden rounded-lg bg-card-elevated shadow-card ring-1 ring-border/40">
+        {/* Desktop: tabela */}
+        <div className="mt-4 hidden overflow-hidden rounded-lg bg-card-elevated shadow-card ring-1 ring-border/40 md:block">
           <div className="grid grid-cols-[140px_1fr_180px_160px_40px] gap-4 border-b border-border/60 px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <span>Data</span>
             <span>Descrição</span>
@@ -255,6 +256,66 @@ export default function Caixa() {
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Mobile: cards */}
+        <div className="mt-4 space-y-3 md:hidden">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="rounded-lg bg-card-elevated px-4 py-12 text-center shadow-card ring-1 ring-border/40">
+              <p className="text-sm font-medium text-foreground">Nenhum lançamento em {periodLabel}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Use "Lançar Transação" pra registrar entradas ou mande uma mensagem no WhatsApp pra registrar gastos.
+              </p>
+            </div>
+          ) : (
+            filtered.map((e) => (
+              <div
+                key={e.id}
+                className="rounded-lg bg-card-elevated p-4 shadow-card ring-1 ring-border/40"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 items-start gap-2">
+                    <span className={cn(
+                      "mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full",
+                      e.kind === "ganho" ? "bg-success-soft text-success" : "bg-warning-soft text-warning",
+                    )}>
+                      {e.kind === "ganho" ? <ArrowDown className="h-3.5 w-3.5" /> : <ArrowUp className="h-3.5 w-3.5" />}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground">{e.description}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{formatDateShort(e.date)}</p>
+                    </div>
+                  </div>
+                  <span className={cn(
+                    "shrink-0 text-right font-display text-base font-bold",
+                    e.kind === "ganho" ? "text-success" : "text-warning",
+                  )}>
+                    {formatBRL(e.kind === "ganho" ? e.amount : -e.amount, { withSign: true })}
+                  </span>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <span className={cn(
+                    "rounded-full px-3 py-1 text-xs font-medium",
+                    e.kind === "ganho" ? "bg-success-soft text-success" : "bg-warning-soft text-warning",
+                  )}>
+                    {e.category}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDelete(e)}
+                    aria-label={`Excluir lançamento ${e.description}`}
+                    className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground transition hover:bg-warning-soft hover:text-warning"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             ))
           )}

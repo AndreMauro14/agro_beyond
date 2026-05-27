@@ -64,6 +64,19 @@ export default function Header() {
             </Button>
           )}
         </div>
+
+        {/* Mobile: só o logout (Lançar fica no BottomNav) */}
+        {usuario && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleLogout}
+            aria-label={`Sair (${usuario.email})`}
+            className="md:hidden"
+          >
+            <LogOut className="h-5 w-5" />
+          </Button>
+        )}
       </div>
     </header>
   );
